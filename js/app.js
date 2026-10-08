@@ -555,8 +555,10 @@ const SB = (() => {
       people.clear();
       preds.forEach(r=>{ const d=r.user_id===uid?remote:bucket(r.user_id); d.preds[r.project_id]={v:r.vote,r:r.reasons||[],t:Date.parse(r.updated_at)||0}; });
       cms.forEach(r=>{ const d=r.user_id===uid?remote:bucket(r.user_id); (d.cm[r.project_id]||(d.cm[r.project_id]=[])).push({id:r.id,text:r.text,t:Date.parse(r.created_at)||0}); });
-      /* переносим в базу то, что человек успел сделать без неё */
-      const local=me, ops=[];
+      /* один раз переносим в базу то, что человек успел сделать до её подключения.
+         Потом не переносим: иначе удалённые админом комментарии вернулись бы из памяти браузера */
+      const migrate=!LS.get("migrated",false);
+      const local=migrate?me:{preds:{},cm:{}}, ops=[];
       for(const pid in local.preds){
         const lp=local.preds[pid], rp=remote.preds[pid];
         if(BY[pid]&&lp&&lp.v&&(!rp||(lp.t||0)>(rp.t||0))){ remote.preds[pid]=lp; ops.push({t:"pred",pid}); }
@@ -569,9 +571,9 @@ const SB = (() => {
           (remote.cm[pid]||(remote.cm[pid]=[])).push(nc); ops.push({t:"cadd",pid,c:nc}); });
       }
       const remoteName=(prof.data&&prof.data.name)||"";
-      if(!remoteName&&myName) ops.push({t:"name",name:myName}); else myName=remoteName;
+      if(migrate&&!remoteName&&myName) ops.push({t:"name",name:myName}); else myName=remoteName;
       me=remote; mode="live"; backend="supabase";
-      ops.forEach(write);
+      ops.forEach(write); LS.set("migrated",true);
       LS.set("me",me); LS.set("name",myName);
       recompute(); refreshAll();
       loadNames([...people.keys()]);
@@ -593,7 +595,8 @@ const SB = (() => {
         .subscribe();
     }catch(e){
       fail(e); sb=null; mode="local"; backend=null; renderSide(); if(ui.view==="profile") renderPage();
-      toast("Сервер недоступен — прогнозы сохраняются на этом устройстве");
+      const m=String(e&&e.message||"");
+      toast(/anonymous/i.test(m)?"Вход не настроен: включи Anonymous sign-ins в Supabase":"Сервер недоступен — прогнозы сохраняются на этом устройстве");
     }
   }
   return {start,write};
